@@ -11,7 +11,7 @@ app = Flask(__name__)
 # --- НАСТРОЙКА БАЗЫ ДАННЫХ ---
 # Если код запущен на Render, используем вашу базу данных PostgreSQL
 if os.environ.get('RENDER'):
-    DB_URL = "postgresql://lab3_db_6uur_user:sL2ZWtaAorXBNv9v5HEUz5dIKQZkwtz1@dpg-db16jg5g1s2s738q9bk0-a/lab3_db_6uur"
+    DB_URL = "postgresql+psycopg2://lab3_db_6uur_user:sL2ZWtaAorXBNv9v5HEUz5dIKQZkwtz1@dpg-db16jg5g1s2s738q9bk0-a/lab3_db_6uur"
 else:
     # Если запущен на домашнем ПК, используем локальный файл
     DB_URL = "sqlite:///local_logs.db"
