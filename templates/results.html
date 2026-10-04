@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Результаты тестирования</title>
+    <!-- Подключаем библиотеку Vis.js для отрисовки графов -->
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
+        h1, h2 { color: #333; }
+        #network {
+            width: 100%;
+            height: 500px;
+            border: 1px solid #ccc;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #007bff; color: white; }
+        .analysis-box {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Анализ ассоциативной сети</h1>
+    
+    <h2>1. Восстановленная структура (Быстрые связи)</h2>
+    <div id="network"></div>
+    
+    <div class="analysis-box">
+        <h3>Анализ результатов</h3>
+        <p>Граф выше построен на основе пар понятий, которым соответствуют наименьшие времена ответов. Согласно методике, именно эти понятия являются непосредственно связанными в ассоциативной сети.</p>
+        <p>Если структура графа удачно повторяет заложенную иерархию, значит время ответа на вопросы о непосредственных свойствах действительно достоверно ниже, чем на абстрактные (наследуемые) свойства. Если граф получился хаотичным, возможные причины неудачи: недостаточный размер выборки группы людей или усталость испытуемых.</p>
+    </div>
+
+    <h2>2. Статистика (Усреднение и Дисперсия)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Понятие 1</th>
+                <th>Понятие 2 (Свойство/Класс)</th>
+                <th>Среднее время (сек)</th>
+                <th>Дисперсия</th>
+                <th>Кол-во ответов</th>
+            </tr>
+        </thead>
+        <tbody id="stats-table">
+            <tr><td colspan="5">Загрузка данных...</td></tr>
+        </tbody>
+    </table>
+
+    <script>
+        fetch('/api/analyze')
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('stats-table').innerHTML = `<tr><td colspan="5">${data.error}</td></tr>`;
+                    return;
+                }
+
+                // 1. Отрисовка таблицы
+                const tbody = document.getElementById('stats-table');
+                tbody.innerHTML = '';
+                data.stats.forEach(row => {
+                    let tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${row.concept_1}</td>
+                        <td>${row.concept_2}</td>
+                        <td><strong>${row.mean_time.toFixed(3)}</strong></td>
+                        <td>${row.variance.toFixed(3)}</td>
+                        <td>${row.answers_count}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                // 2. Отрисовка графа
+                const container = document.getElementById('network');
+                const graphData = {
+                    nodes: new vis.DataSet(data.nodes),
+                    edges: new vis.DataSet(data.edges)
+                };
+                const options = {
+                    physics: {
+                        stabilization: true,
+                        barnesHut: { springLength: 150 }
+                    },
+                    edges: {
+                        font: { size: 12, align: 'middle' },
+                        color: { color: '#007bff' }
+                    },
+                    nodes: {
+                        shape: 'box',
+                        color: { background: '#ffffff', border: '#007bff' },
+                        font: { size: 16 }
+                    }
+                };
+                new vis.Network(container, graphData, options);
+            });
+    </script>
+</body>
+</html>
