@@ -36,7 +36,11 @@
 <body>
 
     <h1>Анализ ассоциативной сети</h1>
-    
+    <div style="margin-bottom: 20px; display: flex; gap: 15px;">
+        <a href="/api/download_logs" style="padding: 10px 20px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">Скачать сырые данные (CSV)</a>
+        
+        <a href="/api/clear_db" onclick="return confirm('ВНИМАНИЕ! Вы точно хотите удалить ВСЕ собранные ответы? Это действие нельзя отменить.');" style="padding: 10px 20px; background-color: #dc3545; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">Очистить базу данных</a>
+    </div>
     <h2>1. Восстановленная структура (Быстрые связи)</h2>
     <div id="network"></div>
     

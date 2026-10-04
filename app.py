@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_file
 import os
 import uuid
 import json
@@ -164,6 +164,26 @@ def analyze():
         })
         
     return jsonify({"stats": stats.to_dict('records'), "nodes": nodes, "edges": edges})
+
+@app.route('/api/download_logs')
+def download_logs():
+    # Читаем всю таблицу напрямую из облачной базы данных
+    with engine.connect() as conn:
+        df = pd.read_sql(test_logs.select(), conn)
+    
+    if df.empty:
+        return "База данных пока пуста."
+        
+    # Сохраняем файл для Excel (utf-8-sig корректно отобразит русский текст)
+    df.to_csv('database_dump.csv', index=False, encoding='utf-8-sig')
+    return send_file('database_dump.csv', as_attachment=True)
+
+@app.route('/api/clear_db')
+def clear_db():
+    # Удаляем все записи из таблицы
+    with engine.begin() as conn:
+        conn.execute(test_logs.delete())
+    return "База данных успешно очищена! <br><br> <a href='/'>Вернуться на главную страницу</a>"
 
 if __name__ == '__main__':
     app.run(debug=True)
