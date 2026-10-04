@@ -62,7 +62,7 @@ def generate_questions(kb):
         
         # Вопросы на конкретные свойства
         for prop in data.get("properties", []):
-            questions.append({"concept_1": concept, "concept_2": prop, "text": f"Свойственно ли понятию '{concept}' {prop}?", "is_correct": True})
+            questions.append({"concept_1": concept, "concept_2": prop, "text": f"Верно ли утверждение: {concept} — {prop}?", "is_correct": True})
             
         # Вопросы на иерархию
         for ancestor in ancestors:
