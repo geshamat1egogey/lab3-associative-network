@@ -93,8 +93,8 @@ def generate_questions(kb):
             q['id'] = f"q_{len(unique_questions) + 1}"
             unique_questions.append(q)
 
-    random.shuffle(unique_questions)
-    # База вопросов для одного человека должна составлять порядка 100 вопросов[cite: 1]
+    # ИСПОЛЬЗУЕМ ФИКСИРОВАННЫЙ СИД ДЛЯ ЕДИНОГО ОПРОСНИКА
+    random.Random(42).shuffle(unique_questions)
     return unique_questions[:100]
 
 
