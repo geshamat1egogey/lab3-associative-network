@@ -110,13 +110,31 @@ def results():
 @app.route('/api/start_session', methods=['GET'])
 def start_session():
     kb = load_kb()
-    questions = generate_questions(kb)
-    return jsonify({"user_id": str(uuid.uuid4()), "questions": questions})
+    real_questions = generate_questions(kb)
+    
+    # Жестко задаем 5 понятных вопросов для разминки
+    practice_questions = [
+        {"id": "practice_1", "concept_1": "Тренировка", "concept_2": "Да", "text": "ТРЕНИРОВКА: Небо — голубое? (Нажмите ВЛЕВО / Да)", "is_correct": True},
+        {"id": "practice_2", "concept_1": "Тренировка", "concept_2": "Нет", "text": "ТРЕНИРОВКА: Камень — мягкий? (Нажмите ВПРАВО / Нет)", "is_correct": False},
+        {"id": "practice_3", "concept_1": "Тренировка", "concept_2": "Да", "text": "ТРЕНИРОВКА: Лёд — холодный? (Нажмите ВЛЕВО / Да)", "is_correct": True},
+        {"id": "practice_4", "concept_1": "Тренировка", "concept_2": "Нет", "text": "ТРЕНИРОВКА: Огонь — мокрый? (Нажмите ВПРАВО / Нет)", "is_correct": False},
+        {"id": "practice_5", "concept_1": "Тренировка", "concept_2": "Да", "text": "ТРЕНИРОВКА: Сейчас начнется настоящий тест, готовы? (Нажмите ВЛЕВО / Да)", "is_correct": True}
+    ]
+    
+    # Склеиваем списки: 5 тренировочных идут строго перед 100 настоящими
+    all_questions = practice_questions + real_questions
+    
+    return jsonify({"user_id": str(uuid.uuid4()), "questions": all_questions})
 
 @app.route('/api/save_log', methods=['POST'])
 def save_log():
     data = request.get_json()
-    # Программа автоматически записывает результаты ответов в базу данных PostgreSQL[cite: 1]
+    
+    # Отсекаем вопросы, ID которых начинается с "practice_"
+    if str(data.get('question_id')).startswith('practice_'):
+        return jsonify({"status": "practice_ignored"})
+        
+    # Настоящие вопросы записываем в базу данных PostgreSQL
     with engine.begin() as conn:
         conn.execute(test_logs.insert().values(
             user_id=data.get('user_id'),
