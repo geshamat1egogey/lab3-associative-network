@@ -219,8 +219,8 @@ def download_logs():
     buffer.seek(0)
     return send_file(buffer, mimetype='text/csv', download_name='database_dump.csv', as_attachment=True)
 
-@app.route('/api/clear_db')
-def clear_db():
+#@app.route('/api/clear_db')
+#def clear_db():
     with engine.begin() as conn:
         conn.execute(test_logs.delete())
     return "База данных успешно очищена! <br><br> <a href='/'>Вернуться на главную страницу</a>"
