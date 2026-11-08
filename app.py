@@ -71,16 +71,16 @@ def generate_questions(kb):
             questions.append({
                 "concept_1": concept,
                 "concept_2": prop,
-                "text": f"Верно ли утверждение: {concept} — {prop}?",
+                "text": f"{concept} — {prop}?",
                 "is_correct": True
             })
             
-        # 2. Вопросы на иерархию
+        # 2. Вопросы на иерархию (категории)
         for ancestor in ancestors:
             questions.append({
                 "concept_1": concept,
                 "concept_2": ancestor,
-                "text": f"Является ли '{concept}' категорией '{ancestor}'?",
+                "text": f"{concept} — это {ancestor.lower()}?",
                 "is_correct": True
             })
             
@@ -91,11 +91,11 @@ def generate_questions(kb):
                 questions.append({
                     "concept_1": concept,
                     "concept_2": prop,
-                    "text": f"Свойственно ли понятию '{concept}' — {prop}?",
+                    "text": f"{concept} — {prop}?",
                     "is_correct": is_corr
                 })
 
-        # 4. Ложные вопросы для кнопки "Нет" (используем rng вместо обычного random!)
+        # 4. Ложные вопросы для кнопки "Нет"
         valid_false_props = [
             p for p in all_properties 
             if p not in data.get("properties", []) 
@@ -106,7 +106,7 @@ def generate_questions(kb):
             questions.append({
                 "concept_1": concept,
                 "concept_2": prop,
-                "text": f"Свойственно ли понятию '{concept}' — {prop}?",
+                "text": f"{concept} — {prop}?",
                 "is_correct": False
             })
 
