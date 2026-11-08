@@ -226,4 +226,4 @@ def clear_db():
     return "База данных успешно очищена! <br><br> <a href='/'>Вернуться на главную страницу</a>"
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=80)
