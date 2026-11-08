@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template, send_file
 import os
+import io
 import uuid
 import json
 import random
@@ -9,17 +10,19 @@ from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, 
 app = Flask(__name__)
 
 # --- НАСТРОЙКА БАЗЫ ДАННЫХ ---
-# Если код запущен на Render, используем вашу базу данных PostgreSQL
-if os.environ.get('RENDER'):
+if os.path.exists('/data'):
+    # Amvera Cloud: постоянное хранилище /data (не стирается при перезагрузках)
+    DB_URL = "sqlite:////data/experiment_logs.db"
+elif os.environ.get('RENDER'):
+    # Render: облачная PostgreSQL
     DB_URL = "postgresql+psycopg2://lab3_db_6uur_user:sL2ZWtaAorXBNv9v5HEUz5dIKQZkwtz1@dpg-db16jg5g1s2s738q9bk0-a/lab3_db_6uur"
 else:
-    # Если запущен на домашнем ПК, используем локальный файл
+    # Локальный компьютер
     DB_URL = "sqlite:///local_logs.db"
 
 engine = create_engine(DB_URL)
 metadata = MetaData()
 
-# Описываем структуру таблицы для логов (заменяет старый CSV)
 test_logs = Table(
     'test_logs', metadata,
     Column('id', Integer, primary_key=True),
@@ -32,7 +35,6 @@ test_logs = Table(
     Column('reaction_time_sec', Float)
 )
 
-# Автоматически создаем таблицу в базе, если ее еще нет
 metadata.create_all(engine)
 
 
@@ -50,38 +52,63 @@ def get_all_ancestors(kb, concept):
     return ancestors
 
 def generate_questions(kb):
+    # Создаем генератор со строго фиксированным сидом 42 для ВСЕХ случайных операций
+    rng = random.Random(42)
     questions = []
-    all_properties = set()
+    
+    all_properties_set = set()
     for data in kb.values():
-        all_properties.update(data.get("properties", []))
-    all_properties = list(all_properties)
+        all_properties_set.update(data.get("properties", []))
+    # Обязательно сортируем список, так как set() в Python меняет порядок при перезапуске!
+    all_properties = sorted(list(all_properties_set))
     
     for concept, data in kb.items():
         ancestors = get_all_ancestors(kb, concept)
         exceptions = data.get("exceptions", {})
         
-        # Вопросы на конкретные свойства
+        # 1. Вопросы на конкретные свойства
         for prop in data.get("properties", []):
-            questions.append({"concept_1": concept, "concept_2": prop, "text": f"Верно ли утверждение: {concept} — {prop}?", "is_correct": True})
+            questions.append({
+                "concept_1": concept,
+                "concept_2": prop,
+                "text": f"Верно ли утверждение: {concept} — {prop}?",
+                "is_correct": True
+            })
             
-        # Вопросы на иерархию
+        # 2. Вопросы на иерархию
         for ancestor in ancestors:
-            questions.append({"concept_1": concept, "concept_2": ancestor, "text": f"Является ли '{concept}' категорией '{ancestor}'?", "is_correct": True})
+            questions.append({
+                "concept_1": concept,
+                "concept_2": ancestor,
+                "text": f"Является ли '{concept}' категорией '{ancestor}'?",
+                "is_correct": True
+            })
             
-        # Вопросы на абстрактные (наследуемые) свойства
+        # 3. Вопросы на абстрактные (наследуемые) свойства и исключения
         for ancestor in ancestors:
             for prop in kb[ancestor].get("properties", []):
-                if prop in exceptions:
-                    is_corr = exceptions[prop]
-                    questions.append({"concept_1": concept, "concept_2": prop, "text": f"Свойственно ли понятию '{concept}' {prop}?", "is_correct": is_corr})
-                else:
-                    questions.append({"concept_1": concept, "concept_2": prop, "text": f"Свойственно ли понятию '{concept}' {prop}?", "is_correct": True})
+                is_corr = exceptions.get(prop, True)
+                questions.append({
+                    "concept_1": concept,
+                    "concept_2": prop,
+                    "text": f"Свойственно ли понятию '{concept}' — {prop}?",
+                    "is_correct": is_corr
+                })
 
-        # Ложные вопросы для кнопки "Нет"
-        valid_false_props = [p for p in all_properties if p not in data.get("properties", []) and not any(p in kb[anc].get("properties", []) for anc in ancestors)]
-        false_props = random.sample(valid_false_props, min(3, len(valid_false_props)))
+        # 4. Ложные вопросы для кнопки "Нет" (используем rng вместо обычного random!)
+        valid_false_props = [
+            p for p in all_properties 
+            if p not in data.get("properties", []) 
+            and not any(p in kb[anc].get("properties", []) for anc in ancestors)
+        ]
+        false_props = rng.sample(valid_false_props, min(3, len(valid_false_props)))
         for prop in false_props:
-            questions.append({"concept_1": concept, "concept_2": prop, "text": f"Свойственно ли понятию '{concept}' {prop}?", "is_correct": False})
+            questions.append({
+                "concept_1": concept,
+                "concept_2": prop,
+                "text": f"Свойственно ли понятию '{concept}' — {prop}?",
+                "is_correct": False
+            })
 
     # Очистка от дубликатов
     unique_questions = []
@@ -93,9 +120,20 @@ def generate_questions(kb):
             q['id'] = f"q_{len(unique_questions) + 1}"
             unique_questions.append(q)
 
-    # ИСПОЛЬЗУЕМ ФИКСИРОВАННЫЙ СИД ДЛЯ ЕДИНОГО ОПРОСНИКА
-    random.Random(42).shuffle(unique_questions)
+    # Перемешиваем тем же фиксированным генератором
+    rng.shuffle(unique_questions)
     return unique_questions[:100]
+
+# Генерируем 100 вопросов один раз при старте сервера, чтобы не нагружать процессор
+FIXED_QUESTIONS = generate_questions(load_kb())
+
+PRACTICE_QUESTIONS = [
+    {"id": "practice_1", "concept_1": "Тренировка", "concept_2": "Да", "text": "ТРЕНИРОВКА: Небо — голубое? (Нажмите ВЛЕВО / Да)", "is_correct": True},
+    {"id": "practice_2", "concept_1": "Тренировка", "concept_2": "Нет", "text": "ТРЕНИРОВКА: Камень — мягкий? (Нажмите ВПРАВО / Нет)", "is_correct": False},
+    {"id": "practice_3", "concept_1": "Тренировка", "concept_2": "Да", "text": "ТРЕНИРОВКА: Лёд — холодный? (Нажмите ВЛЕВО / Да)", "is_correct": True},
+    {"id": "practice_4", "concept_1": "Тренировка", "concept_2": "Нет", "text": "ТРЕНИРОВКА: Огонь — мокрый? (Нажмите ВПРАВО / Нет)", "is_correct": False},
+    {"id": "practice_5", "concept_1": "Тренировка", "concept_2": "Да", "text": "ТРЕНИРОВКА: Сейчас начнется настоящий тест, готовы? (Нажмите ВЛЕВО / Да)", "is_correct": True}
+]
 
 
 # --- МАРШРУТЫ СЕРВЕРА ---
@@ -109,32 +147,16 @@ def results():
 
 @app.route('/api/start_session', methods=['GET'])
 def start_session():
-    kb = load_kb()
-    real_questions = generate_questions(kb)
-    
-    # Жестко задаем 5 понятных вопросов для разминки
-    practice_questions = [
-        {"id": "practice_1", "concept_1": "Тренировка", "concept_2": "Да", "text": "ТРЕНИРОВКА: Небо — голубое? (Нажмите ВЛЕВО / Да)", "is_correct": True},
-        {"id": "practice_2", "concept_1": "Тренировка", "concept_2": "Нет", "text": "ТРЕНИРОВКА: Камень — мягкий? (Нажмите ВПРАВО / Нет)", "is_correct": False},
-        {"id": "practice_3", "concept_1": "Тренировка", "concept_2": "Да", "text": "ТРЕНИРОВКА: Лёд — холодный? (Нажмите ВЛЕВО / Да)", "is_correct": True},
-        {"id": "practice_4", "concept_1": "Тренировка", "concept_2": "Нет", "text": "ТРЕНИРОВКА: Огонь — мокрый? (Нажмите ВПРАВО / Нет)", "is_correct": False},
-        {"id": "practice_5", "concept_1": "Тренировка", "concept_2": "Да", "text": "ТРЕНИРОВКА: Сейчас начнется настоящий тест, готовы? (Нажмите ВЛЕВО / Да)", "is_correct": True}
-    ]
-    
-    # Склеиваем списки: 5 тренировочных идут строго перед 100 настоящими
-    all_questions = practice_questions + real_questions
-    
+    all_questions = PRACTICE_QUESTIONS + FIXED_QUESTIONS
     return jsonify({"user_id": str(uuid.uuid4()), "questions": all_questions})
 
 @app.route('/api/save_log', methods=['POST'])
 def save_log():
     data = request.get_json()
     
-    # Отсекаем вопросы, ID которых начинается с "practice_"
     if str(data.get('question_id')).startswith('practice_'):
         return jsonify({"status": "practice_ignored"})
         
-    # Настоящие вопросы записываем в базу данных PostgreSQL
     with engine.begin() as conn:
         conn.execute(test_logs.insert().values(
             user_id=data.get('user_id'),
@@ -149,31 +171,31 @@ def save_log():
 
 @app.route('/api/analyze', methods=['GET'])
 def analyze():
-    # Читаем все данные из БД прямо в pandas DataFrame
     with engine.connect() as conn:
         df = pd.read_sql(test_logs.select(), conn)
     
     if df.empty:
         return jsonify({"error": "Нет данных для анализа. Пройдите тестирование."})
     
-    # Фильтруем: берем только верные ответы для построения сети
-    df = df[(df['is_correct_logic'] == True) & (df['user_answer'] == True)]
+    # 1. Оставляем ТОЛЬКО ПРАВИЛЬНЫЕ ответы (Да=Да или Нет=Нет)
+    correct_df = df[df['is_correct_logic'] == df['user_answer']]
     
-    if df.empty:
-        return jsonify({"error": "Нет правильных ответов для построения сети."})
+    if correct_df.empty:
+        return jsonify({"error": "Нет правильных ответов для анализа."})
         
-    # Произвести усреднение времен ответов на вопросы по группе людей и вычислить дисперсии[cite: 1]
-    stats = df.groupby(['concept_1', 'concept_2'])['reaction_time_sec'].agg(
+    stats = correct_df.groupby(['concept_1', 'concept_2', 'is_correct_logic'])['reaction_time_sec'].agg(
         mean_time='mean', variance='var', answers_count='count'
     ).reset_index().fillna(0).sort_values(by='mean_time')
     
-    nodes_set = set(stats['concept_1']).union(set(stats['concept_2']))
+    # 2. Для построения ГРАФА берем только существующие положительные связи (где правильный ответ "Да")
+    positive_stats = stats[stats['is_correct_logic'] == True]
+    
+    nodes_set = set(positive_stats['concept_1']).union(set(positive_stats['concept_2']))
     nodes = [{"id": n, "label": n} for n in nodes_set]
     
     edges = []
-    # Построение сети рекомендуется начинать с пар понятий, которым соответствуют наименьшие времена ответов[cite: 1]
-    threshold_index = max(1, len(stats) // 3)
-    fastest_pairs = stats.head(threshold_index)
+    threshold_index = max(1, len(positive_stats) // 3)
+    fastest_pairs = positive_stats.head(threshold_index)
     
     for _, row in fastest_pairs.iterrows():
         edges.append({
@@ -185,20 +207,20 @@ def analyze():
 
 @app.route('/api/download_logs')
 def download_logs():
-    # Читаем всю таблицу напрямую из облачной базы данных
     with engine.connect() as conn:
         df = pd.read_sql(test_logs.select(), conn)
     
     if df.empty:
         return "База данных пока пуста."
         
-    # Сохраняем файл для Excel (utf-8-sig корректно отобразит русский текст)
-    df.to_csv('database_dump.csv', index=False, encoding='utf-8-sig')
-    return send_file('database_dump.csv', as_attachment=True)
+    # Отдаем файл напрямую из оперативной памяти без создания лишних файлов на диске
+    buffer = io.BytesIO()
+    df.to_csv(buffer, index=False, encoding='utf-8-sig')
+    buffer.seek(0)
+    return send_file(buffer, mimetype='text/csv', download_name='database_dump.csv', as_attachment=True)
 
 @app.route('/api/clear_db')
 def clear_db():
-    # Удаляем все записи из таблицы
     with engine.begin() as conn:
         conn.execute(test_logs.delete())
     return "База данных успешно очищена! <br><br> <a href='/'>Вернуться на главную страницу</a>"

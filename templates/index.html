@@ -23,7 +23,7 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.1);
         }
         h1 { font-size: 24px; color: #333; min-height: 60px; }
-        .instructions { color: #666; margin-top: 20px; }
+        .instructions { color: #666; margin-top: 20px; min-height: 30px; }
         .key {
             display: inline-block;
             background: #eee;
@@ -32,11 +32,17 @@
             border: 1px solid #ccc;
             font-weight: bold;
         }
+        .progress {
+            font-size: 13px;
+            color: #999;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
 
     <div id="experiment-container">
+        <div class="progress" id="progress-box"></div>
         <h1 id="question-box">Загрузка вопросов...</h1>
         <div class="instructions" id="instructions-box">
             Ожидайте...
@@ -49,34 +55,62 @@
         let questions = [];
         let currentQuestionIndex = 0;
         let startTime = 0;
-        let state = "LOADING"; // Состояния: LOADING, WAITING_FOR_SPACE, WAITING_FOR_ANSWER, FINISHED
+        // Состояния: LOADING, WAITING_FOR_SPACE, WAITING_FOR_ANSWER, SAVING, FINISHED
+        let state = "LOADING"; 
 
         const questionBox = document.getElementById('question-box');
         const instructionsBox = document.getElementById('instructions-box');
+        const progressBox = document.getElementById('progress-box');
 
-        // Шаг 1: Получаем данные с сервера
+        // Вспомогательная функция: делает до 3 попыток отправки при сбое сети
+        async function sendWithRetry(url, payload, retries = 3) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (response.ok) {
+                        return await response.json();
+                    }
+                } catch (err) {
+                    console.warn(`Попытка отправки ${i + 1} не удалась...`);
+                }
+                await new Promise(resolve => setTimeout(resolve, 800));
+            }
+            throw new Error("Не удалось связаться с сервером");
+        }
+
+        // Шаг 1: Получаем вопросы с сервера
         fetch('/api/start_session')
             .then(response => response.json())
             .then(data => {
                 userId = data.user_id;
                 questions = data.questions;
                 setWaitingForSpaceState();
+            })
+            .catch(() => {
+                questionBox.innerText = "Ошибка загрузки вопросов";
+                instructionsBox.innerText = "Обновите страницу (F5)";
             });
 
-        // Функция перевода в режим ожидания (пользователь отдыхает)
+        // Режим отдыха между вопросами
         function setWaitingForSpaceState() {
             if (currentQuestionIndex >= questions.length) {
                 state = "FINISHED";
-                questionBox.innerText = "Тестирование завершено. Спасибо!";
-                instructionsBox.innerText = "Можете закрыть страницу.";
+                progressBox.innerText = "";
+                questionBox.innerText = "Тестирование завершено. Все ответы успешно сохранены, спасибо!";
+                instructionsBox.innerText = "Можете закрыть страницу или посмотреть статистику.";
                 return;
             }
             state = "WAITING_FOR_SPACE";
+            progressBox.innerText = `Вопрос ${currentQuestionIndex + 1} из ${questions.length}`;
             questionBox.innerText = "Готовы к следующему вопросу?";
             instructionsBox.innerHTML = "Нажмите <span class='key'>ПРОБЕЛ</span>, когда будете готовы";
         }
 
-        // Функция показа вопроса
+        // Показ вопроса
         function showNextQuestion() {
             state = "WAITING_FOR_ANSWER";
             let q = questions[currentQuestionIndex];
@@ -86,39 +120,45 @@
         }
 
         // Обработчик клавиатуры
-        document.addEventListener('keydown', function(event) {
-            // Игнорируем нажатия, если тест закончен
-            if (state === "FINISHED") return;
+        document.addEventListener('keydown', async function(event) {
+            if (state === "FINISHED" || state === "SAVING" || state === "LOADING") return;
 
-            // Если ждем готовности и нажат Пробел
             if (state === "WAITING_FOR_SPACE" && event.code === 'Space') {
+                event.preventDefault(); // Чтобы страница не прокручивалась от пробела
                 showNextQuestion();
             }
-            // Если ждем ответ и нажата стрелка
             else if (state === "WAITING_FOR_ANSWER") {
                 if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+                    // 1. Сразу фиксируем точное время реакции до работы сети
                     let endTime = performance.now();
                     let reactionTimeSec = (endTime - startTime) / 1000.0;
                     let userAnswer = (event.code === 'ArrowLeft') ? true : false;
                     let currentQ = questions[currentQuestionIndex];
 
-                    // Отправляем результат
-                    fetch('/api/save_log', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            user_id: userId,
-                            question_id: currentQ.id,
-                            concept_1: currentQ.concept_1,
-                            concept_2: currentQ.concept_2,
-                            is_correct_logic: currentQ.is_correct,
-                            answer: userAnswer,
-                            reaction_time: reactionTimeSec
-                        })
-                    });
+                    // 2. Блокируем повторные нажатия на время сохранения
+                    state = "SAVING";
+                    questionBox.innerText = "Сохранение ответа...";
+                    instructionsBox.innerText = "Подождите долю секунды...";
 
-                    currentQuestionIndex++;
-                    setWaitingForSpaceState(); // Возвращаем в режим отдыха
+                    const payload = {
+                        user_id: userId,
+                        question_id: currentQ.id,
+                        concept_1: currentQ.concept_1,
+                        concept_2: currentQ.concept_2,
+                        is_correct_logic: currentQ.is_correct,
+                        answer: userAnswer,
+                        reaction_time: reactionTimeSec
+                    };
+
+                    try {
+                        // 3. Ждем гарантированной записи на сервере
+                        await sendWithRetry('/api/save_log', payload, 3);
+                        currentQuestionIndex++;
+                        setWaitingForSpaceState();
+                    } catch (error) {
+                        alert("⚠️ Ошибка соединения с сервером! Проверьте интернет и ответьте на этот вопрос ещё раз. Ваш прогресс сохранен.");
+                        showNextQuestion(); // Возвращаем этот же вопрос и сбрасываем таймер
+                    }
                 }
             }
         });
